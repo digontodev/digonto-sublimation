@@ -1,0 +1,30 @@
+{
+  "slug": "digonto-sublimation",
+  "name": "Digonto Sublimation",
+  "version": "1.4.8",
+  "comment": "Sublimation printing for 4-ink Epson printers through the driver: mirror, ICC, ink fine-tuning",
+  "entry": "digonto_sublimation.py",
+  "files": [
+    "digonto_sublimation.py",
+    "digonto_ui.py",
+    "dtfrip",
+    "profiles",
+    "assets",
+    "requirements.txt",
+    "README.txt"
+  ],
+  "requirements": "requirements.txt",
+  "check": "import numpy, fitz, PIL, PySide6.QtWidgets; import dtfrip.core as c, dtfrip.gui; c.lib()",
+  "needs_tk": false,
+  "categories": "Graphics;Printing;",
+  "keywords": "sublimation;transfer;rip;printer;epson;l800;ink;",
+  "wm_class": "digonto-sublimation",
+  "legacy": {
+    "linux": [],
+    "darwin": [],
+    "windows": []
+  },
+  "apt": [
+    "libxcb-cursor0"
+  ]
+}
