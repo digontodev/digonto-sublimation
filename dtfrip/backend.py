@@ -108,7 +108,7 @@ def upload(filepath):
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise EngineError(f"{name}: cannot read ({e})") from None
-    usable = 210 - 2 * 3.2
+    usable = PAGE_W(rs) - 2 * 3.2                       # the paper that is set (A4, A3 for the L1800, a roll ...)
     items.append(Item(str(dest), width_mm=round(min(nw, usable), 1), name=name))
     save_session(items, rs)
     return {"added": [name]}

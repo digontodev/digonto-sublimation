@@ -86,7 +86,7 @@ def list_devices():
 
 def _is_epson(text):
     t = text.upper()
-    return "L800" in t or "L805" in t
+    return any(m in t for m in ("L800", "L805", "L1800"))     # the same print head (Gutenprint data)
 
 
 def find_device():
