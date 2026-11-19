@@ -616,8 +616,28 @@ class Window(QMainWindow):
             self.tabs.setTabVisible(1, False)          # the L800 head tools are not used here
             self.tabs.addTab(self.build_maint_sub(), "Maintenance")
             QTimer.singleShot(2500, self.weekly_check)
+        self.maint_index = self.tabs.count() - 1 if FLAVOR == "sub" else 1
+        self.tabs.tabBar().hide()                       # the left bar switches the pages now
+        self.rail = ui.Rail(
+            [("new", "new", "New job - remove all artwork", self.clear_items),
+             ("open", "open", "Add artwork (PNG, JPG, TIFF, PDF, SVG …)", lambda: (self.tabs.setCurrentIndex(0), self.pick_files())),
+             ("save", "save", "Save the print file", lambda: self.start_print(False)),
+             ("print", "print", "Print", lambda: self.start_print(True)),
+             None,
+             ("job", "pages", "The print job", lambda: self.rail_page(0)),
+             ("maint", "repair", "Maintenance (nozzle check, cleaning …)", lambda: self.rail_page(self.maint_index))],
+            [("settings", "settings", "Settings - printer, connection, profiles", lambda: self.rail_page(2))])
+        for k in ("job", "maint", "settings"):
+            self.rail.button(k).setCheckable(True)
+        self.rail_page(0)
+        body = QWidget()
+        bh = QHBoxLayout(body)
+        bh.setContentsMargins(0, 0, 0, 0)
+        bh.setSpacing(0)
+        bh.addWidget(self.rail)
+        bh.addWidget(self.tabs, 1)
         ui.wrap_with_header(self, ui.make_header(TITLE, TAGLINE,
-                                                 icon, self.about, self.pill), self.tabs)
+                                                 icon, self.about, self.pill), body)
         for cb in self.findChildren(QComboBox):            # drop-downs may shrink with the panel
             cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
             cb.setMinimumContentsLength(8)
@@ -630,6 +650,11 @@ class Window(QMainWindow):
                 target=backend.keepalive_tick, daemon=True).start())
             self.ka_timer.start()
         self.refresh(True)
+
+    def rail_page(self, i):
+        self.tabs.setCurrentIndex(i)
+        for k, idx in (("job", 0), ("maint", self.maint_index), ("settings", 2)):
+            self.rail.button(k).setChecked(idx == i)
 
     # ------------------------------------------------------------------ build: print
     def build_print(self):
