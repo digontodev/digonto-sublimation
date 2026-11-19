@@ -1704,6 +1704,29 @@ class Window(QMainWindow):
         if not self.T.open_driver_maintenance(self.drv_printer.currentData() or ""):
             QMessageBox.information(self, TITLE, self.T.HELP)
 
+    def idle_check(self, last):
+        """DTF: white ink settles when the printer stands still. After a few days without printing, say what to do first."""
+        try:
+            days = (time.time() - float(last)) / 86400 if last else 0
+        except (TypeError, ValueError):
+            return
+        if days < 3:
+            return
+        m = QMessageBox(self)
+        m.setWindowTitle(TITLE)
+        m.setIcon(QMessageBox.Warning)
+        m.setText(f"The printer has not printed for {int(days)} days. White ink may have settled.")
+        m.setInformativeText("Before you print:\n\n"
+                             "1. Shake or stir the white ink and let the stirring motor run for a few minutes.\n"
+                             "2. Run a nozzle check, and a head cleaning if lines are missing.\n"
+                             "3. Print only when the nozzle check is complete.\n\n"
+                             "Tip: keep the white ink motor on its own power or timer, so it also runs while the printer is off.")
+        go = m.addButton("Go to Maintenance", QMessageBox.AcceptRole)
+        m.addButton("Later", QMessageBox.RejectRole)
+        m.exec()
+        if m.clickedButton() is go:
+            self.rail_page(self.maint_index)
+
     def weekly_check(self):
         st = self.T.load_state()
         if self.T.due(st) and QMessageBox.question(
@@ -1790,6 +1813,9 @@ class Window(QMainWindow):
         else:
             self.set_status(f"Ready - {p.get('device')}")
         self.show_job()
+        if FLAVOR == "dtf" and not getattr(self, "_idle_checked", False):
+            self._idle_checked = True
+            QTimer.singleShot(1200, lambda: self.idle_check(S.get("last_print", 0)))
         if hasattr(self, "centre"):
             self.centre.setCurrentIndex(1 if S.get("items") else 0)
         busy = j["stage"] in BUSY
