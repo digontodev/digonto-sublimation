@@ -8,7 +8,7 @@ import uuid
 
 from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QImageReader, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QSizePolicy, QStyledItemDelegate, QTabBar, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QLayout, QListWidget, QListWidgetItem, QFileDialog, QFormLayout, QFrame, QGridLayout,
+from PySide6.QtWidgets import (QSizePolicy, QStackedWidget, QStyledItemDelegate, QTabBar, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QLayout, QListWidget, QListWidgetItem, QFileDialog, QFormLayout, QFrame, QGridLayout,
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSlider, QSpinBox, QSplitter, QTabWidget, QTableWidget, QVBoxLayout, QWidget)
 
@@ -1210,7 +1210,18 @@ class Window(QMainWindow):
         lv.addWidget(self.info)
         lv.addStretch()
         g.addWidget(left, 0, 0)
-        g.addWidget(self._center(), 0, 1)
+        # middle: the Digonto start screen while there is no artwork, the page as soon as there is
+        self.centre = QStackedWidget()
+        self.start = ui.StartScreen(
+            "Sublimation printing: lay out your designs and print them on sublimation paper." if FLAVOR == "sub"
+            else "DTF printing: colour and white in one run, made ready for the film.",
+            [("Add artwork", "open", self.pick_files, True),
+             ("Maintenance", "repair", lambda: self.rail_page(self.maint_index), False),
+             ("Settings", "settings", lambda: self.rail_page(2), False)],
+            "or drop pictures here - PNG, JPG, TIFF, PDF, SVG, WEBP")
+        self.centre.addWidget(self.start)
+        self.centre.addWidget(self._center())
+        g.addWidget(self.centre, 0, 1)
         # right: tabs at the bottom (Layout | Printer | Color | White), job controls under them
         right = QWidget()
         right.setFixedWidth(250)
@@ -1779,6 +1790,8 @@ class Window(QMainWindow):
         else:
             self.set_status(f"Ready - {p.get('device')}")
         self.show_job()
+        if hasattr(self, "centre"):
+            self.centre.setCurrentIndex(1 if S.get("items") else 0)
         busy = j["stage"] in BUSY
         if full or (self.busy_prev and not busy):
             self.fill_all()
@@ -2208,8 +2221,16 @@ class Window(QMainWindow):
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():
             e.acceptProposedAction()
+            if hasattr(self, "start"):
+                self.start.set_dropping(True)
+
+    def dragLeaveEvent(self, e):
+        if hasattr(self, "start"):
+            self.start.set_dropping(False)
 
     def dropEvent(self, e):
+        if hasattr(self, "start"):
+            self.start.set_dropping(False)
         self.add_files([u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()])
 
     def closeEvent(self, e):
