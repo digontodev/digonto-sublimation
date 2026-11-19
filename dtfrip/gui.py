@@ -6,9 +6,9 @@ import threading
 import time
 import uuid
 
-from PySide6.QtCore import QObject, QRect, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QImageReader, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QTabBar, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QLayout, QListWidget, QListWidgetItem, QFileDialog, QFormLayout, QFrame, QGridLayout,
+from PySide6.QtWidgets import (QStyledItemDelegate, QTabBar, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QLayout, QListWidget, QListWidgetItem, QFileDialog, QFormLayout, QFrame, QGridLayout,
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSlider, QSpinBox, QSplitter, QTabWidget, QTableWidget, QVBoxLayout, QWidget)
 
@@ -591,6 +591,27 @@ class InfoBox(QWidget):
         self.vals["Original size"].setText(f"{it['nat_w']:.1f} x {it['nat_h']:.1f} mm" if it.get("nat_w") else "-")
 
 
+class CloseCornerDelegate(QStyledItemDelegate):
+    """the picture strip: a small round x in the top right corner of each picture closes it"""
+    @staticmethod
+    def close_rect(r):
+        return QRect(r.right() - 20, r.top() + 2, 18, 18)
+
+    def paint(self, p, opt, idx):
+        super().paint(p, opt, idx)
+        c = self.close_rect(opt.rect)
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(42, 18, 65, 200))
+        p.drawEllipse(c)
+        p.setPen(QPen(QColor("white"), 1.8))
+        m = 5
+        p.drawLine(c.left() + m, c.top() + m, c.right() - m + 1, c.bottom() - m + 1)
+        p.drawLine(c.right() - m + 1, c.top() + m, c.left() + m, c.bottom() - m + 1)
+        p.restore()
+
+
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -651,6 +672,17 @@ class Window(QMainWindow):
             self.ka_timer.start()
         self.refresh(True)
 
+    def eventFilter(self, obj, ev):
+        strip = getattr(self, "strip", None)
+        if strip is not None and obj is strip.viewport() and ev.type() == QEvent.MouseButtonPress:
+            idx = strip.indexAt(ev.position().toPoint())
+            if idx.isValid() and CloseCornerDelegate.close_rect(strip.visualRect(idx)).contains(ev.position().toPoint()):
+                items = (self.S or {}).get("items", [])
+                if 0 <= idx.row() < len(items):
+                    self.remove_item(items[idx.row()]["index"])
+                return True
+        return super().eventFilter(obj, ev)
+
     def rail_page(self, i):
         self.tabs.setCurrentIndex(i)
         for k, idx in (("job", 0), ("maint", self.maint_index), ("settings", 2)):
@@ -659,7 +691,7 @@ class Window(QMainWindow):
     # ------------------------------------------------------------------ build: print
     def build_print(self):
         self._print_widgets()
-        return self._arrange_sub() if FLAVOR == "sub" else self._arrange_dtf()
+        return self._arrange_dtf()          # DTF and sublimation share one layout
 
     def _print_widgets(self):
         from . import rip as _rip
@@ -1141,6 +1173,18 @@ class Window(QMainWindow):
         sc.setWidget(w)
         return sc
 
+    @staticmethod
+    def _scroll_page(widget):
+        """a settings page that scrolls by itself, so the window never has to be taller than the screen"""
+        if isinstance(widget, QScrollArea):
+            return widget
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.NoFrame)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sc.setWidget(widget)
+        return sc
+
     def _arrange_dtf(self):
         w = QWidget()
         g = QGridLayout(w)
@@ -1207,9 +1251,26 @@ class Window(QMainWindow):
         lt.addStretch(1)
         self.table.setParent(self)             # the list lives on in the background; the picture strip below is the list now
         self.table.hide()
-        tabs.addTab(lay_tab, "Layout")
-        # printer
-        tabs.addTab(self._printer_widget(), "Printer")
+        tabs.addTab(self._scroll_page(lay_tab), "Layout")
+        if FLAVOR == "sub":
+            # output: picture quality and the paper preview (printing itself goes through the printer driver)
+            ot = QWidget()
+            ov = QVBoxLayout(ot)
+            ov.setContentsMargins(0, 0, 0, 0)
+            ov.addWidget(self._bar_title("Preview"))
+            pvw = QWidget()
+            pvl = QHBoxLayout(pvw)
+            pvl.setContentsMargins(8, 8, 8, 8)
+            pvl.setSpacing(4)
+            for b in self.viewbtns.values():
+                pvl.addWidget(b)
+            ov.addWidget(pvw)
+            ov.addWidget(self._bar_title("Media and output"))
+            ov.addWidget(self._form([("Image resolution", self.out_dpi), (None, self.sharpen)]))
+            ov.addStretch()
+            tabs.addTab(self._scroll_page(ot), "Output")
+        else:
+            tabs.addTab(self._printer_widget(), "Printer")
         # colour
         ct = QWidget()
         cv = QVBoxLayout(ct)
@@ -1222,8 +1283,8 @@ class Window(QMainWindow):
         cv.addWidget(self._bar_title("Ink channels"))
         cv.addWidget(self._channels_widget())
         cv.addStretch()
-        tabs.addTab(ct, "Color")
-        # white
+        tabs.addTab(self._scroll_page(ct), "Color")
+        # white (DTF only)
         wt = QWidget()
         wv = QVBoxLayout(wt)
         wv.setContentsMargins(0, 0, 0, 0)
@@ -1241,7 +1302,11 @@ class Window(QMainWindow):
         rows += [(None, self.checks[k]) for k in ("white_w1", "white_w2", "white_bg_transparent", "no_white_under_black")]
         wv.addWidget(self._form(rows))
         wv.addStretch()
-        tabs.addTab(wt, "White")
+        if FLAVOR == "dtf":
+            tabs.addTab(self._scroll_page(wt), "White")
+        else:
+            wt.setParent(self)          # not shown for sublimation, but its settings stay in the program
+            wt.hide()
         rv.addWidget(tabs, 1)
         rv.addWidget(self._job_controls())
         fit_column(right)
@@ -1264,10 +1329,10 @@ class Window(QMainWindow):
         sbl.addWidget(self.strip, 1)
         bc = QVBoxLayout()
         bc.setSpacing(6)
-        self.close_btn = QPushButton("Close")
-        self.close_btn.setToolTip("Take the selected artwork off the page")
-        self.close_btn.clicked.connect(self.close_selected)
-        for b in (self.add_btn, self.clr_btn, self.close_btn):
+        self.strip.setToolTip("Click a picture to select it - the small x in its corner takes it off the page")
+        self.strip.setItemDelegate(CloseCornerDelegate(self.strip))
+        self.strip.viewport().installEventFilter(self)
+        for b in (self.add_btn, self.clr_btn):
             b.setFixedWidth(130)
             bc.addWidget(b)
         bc.addStretch()
@@ -1275,102 +1340,6 @@ class Window(QMainWindow):
         g.addWidget(sb, 1, 0, 1, 2)
         g.setColumnStretch(1, 1)
         g.setRowStretch(0, 1)
-        return w
-
-    # ---- sublimation: job queue on the left, page in the middle, collapsible job properties on the right
-    def _arrange_sub(self):
-        w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
-        tb = QFrame()
-        tb.setObjectName("subbar")
-        tb.setStyleSheet("#subbar{background:#EDE6F4; border-bottom:1px solid #D0C4E1;}")
-        tl = QHBoxLayout(tb)
-        tl.setContentsMargins(10, 6, 10, 6)
-        tl.addWidget(self.add_btn)
-        tl.addWidget(self.clr_btn)
-        tl.addSpacing(10)
-        rot = QPushButton()
-        rot.setIcon(tool_icon("rotate", 22))
-        rot.setIconSize(QSize(22, 22))
-        rot.setFixedSize(38, 34)
-        rot.setToolTip("Rotate the selected artwork by 90 degrees")
-        rot.clicked.connect(self.rotate_selected)
-        tl.addWidget(rot)
-        for text, mode, tip in self.ALIGN:
-            ab = QPushButton()
-            ab.setIcon(tool_icon(mode, 22))
-            ab.setIconSize(QSize(22, 22))
-            ab.setFixedSize(38, 34)
-            ab.setToolTip(f"{text}: {tip}")
-            ab.clicked.connect(lambda _=False, m=mode: self.align(m))
-            tl.addWidget(ab)
-        tl.addWidget(self.checks["mirror"])
-        tl.addStretch()
-        tl.addWidget(self.save)
-        tl.addWidget(self.go)
-        tl.addWidget(self.cancel)
-        v.addWidget(tb)
-        sp = QSplitter(Qt.Horizontal)
-        # jobs
-        jobs = QWidget()
-        jv = QVBoxLayout(jobs)
-        jv.setContentsMargins(0, 0, 0, 0)
-        jv.setSpacing(0)
-        jv.addWidget(self._bar_title("Jobs"))
-        hl = QHBoxLayout()
-        hl.setContentsMargins(8, 6, 8, 0)
-        hl.addWidget(self.hint)
-        jv.addLayout(hl)
-        jv.addWidget(self.table, 1)
-        jv.addWidget(self._bar_title("Image information"))
-        jv.addWidget(self.info)
-        sp.addWidget(jobs)
-        c = QWidget()
-        cl = QVBoxLayout(c)
-        cl.setContentsMargins(6, 6, 6, 0)
-        cl.addWidget(self._center(), 1)
-        sp.addWidget(c)
-        # properties
-        props = QWidget()
-        pv = QVBoxLayout(props)
-        pv.setContentsMargins(0, 0, 0, 0)
-        pv.setSpacing(0)
-        pv.addWidget(Section("Paper size", self._paper_widget()))
-        pv.addWidget(Section("Move artwork", self._move_widget()))
-        pv.addWidget(Section("Media and output", self._form([("Image resolution", self.out_dpi), (None, self.sharpen)])))
-        pv.addWidget(Section("Colour management", self._form([("Colour profile", self.profile), ("Colour intent", self.intent),
-                                                              ("Colour amount", self._slider_row(self.colour_amount, self.cav))])))
-        pv.addWidget(Section("Ink channels", self._channels_widget()))
-        pv.addWidget(Section("Ink amount and curve", self._ink_grid_widget(), opened=False))
-        pv.addStretch()
-        sc = QScrollArea()
-        sc.setWidgetResizable(True)
-        sc.setWidget(props)
-        sc.setFrameShape(QFrame.NoFrame)
-        sc.setFixedWidth(250)
-        fit_column(props)
-        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        sp.addWidget(sc)
-        sp.setStretchFactor(0, 3)
-        sp.setStretchFactor(1, 5)
-        sp.setStretchFactor(2, 3)
-        sp.setSizes([400, 750, 250])
-        self.sub_split = sp
-        self.sub_user_moved = False
-        sp.splitterMoved.connect(lambda *_: setattr(self, "sub_user_moved", True))
-        v.addWidget(sp, 1)
-        st = QFrame()
-        st.setObjectName("substatus")
-        st.setStyleSheet("#substatus{background:#EDE6F4; border-top:1px solid #D0C4E1;}")
-        sl = QHBoxLayout(st)
-        sl.setContentsMargins(10, 4, 10, 4)
-        sl.addWidget(self.jobmsg, 1)
-        sl.addWidget(self.bar)
-        self.bar.setFixedWidth(180)
-        sl.addWidget(self.dl)
-        v.addWidget(st)
         return w
 
     # ---- selection, info, thumbnails
