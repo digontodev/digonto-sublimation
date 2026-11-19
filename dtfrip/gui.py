@@ -8,7 +8,7 @@ import uuid
 
 from PySide6.QtCore import QEvent, QObject, QRect, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QImageReader, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QStyledItemDelegate, QTabBar, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QLayout, QListWidget, QListWidgetItem, QFileDialog, QFormLayout, QFrame, QGridLayout,
+from PySide6.QtWidgets import (QSizePolicy, QStyledItemDelegate, QTabBar, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QLayout, QListWidget, QListWidgetItem, QFileDialog, QFormLayout, QFrame, QGridLayout,
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSlider, QSpinBox, QSplitter, QTabWidget, QTableWidget, QVBoxLayout, QWidget)
 
@@ -774,8 +774,11 @@ class Window(QMainWindow):
         self.step.setSuffix(" mm")
         # printer setup (like AcroRIP): model, port, performance, dot sizes, white detail, feed
         self.model = QComboBox()
-        for t in ("Epson L800 (Colorsun / DTF)", "Epson L805 (same print head)"):
+        for t in ("Epson L800 (Colorsun / DTF)", "Epson L805 (same print head)",
+                  "Epson L1800 (A3 - same print head)"):
             self.model.addItem(t)
+        self.model.setToolTip("These printers share one print head (90 nozzles, 6 channels): same print data.\n"
+                              "The L1800 prints up to A3+ (330 mm wide) - choose A3 under Layout > Paper size.")
         self.device = QComboBox()
         self.device.setEditable(True)
         self.device.lineEdit().setPlaceholderText("Auto  (/dev/usb/lp0 | cups:QUEUE | win:PRINTER NAME)")
@@ -1142,8 +1145,16 @@ class Window(QMainWindow):
         drv.clicked.connect(self.driver_help)
         sv = QPushButton("Save port")
         sv.clicked.connect(self.conn_save)
-        port = QHBoxLayout()
-        port.addWidget(self.device, 1)
+        # the port list fills the width of the panel; "Save port" sits under it (always visible)
+        for cb in (self.model, self.device):
+            cb.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            cb.setMinimumContentsLength(8)
+            cb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        port = QVBoxLayout()
+        port.setSpacing(4)
+        port.addWidget(self.device)
+        sv.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        sv.setMinimumHeight(30)
         port.addWidget(sv)
         v.addWidget(self._form([("Model", self.model), ("Port", port), (None, self.conninfo)]))
         v.addWidget(self._bar_title("Performance"))
@@ -1729,7 +1740,7 @@ class Window(QMainWindow):
         if m.clickedButton() is b1:
             QDesktopServices.openUrl(QUrl("https://www.epson.de/de_DE/support"))
         elif b2 is not None and m.clickedButton() is b2:
-            QDesktopServices.openUrl(QUrl(sysurl))
+            ui.open_external(sysurl)
 
     # ------------------------------------------------------------------ state
     def call(self, path, data=None, then=None, err=None):
@@ -1837,8 +1848,12 @@ class Window(QMainWindow):
             self.device.addItem(d[0])
         self.device.setEditText(S.get("device_override") or "")
         pr = S["printer"]
-        self.conninfo.setText(f"Device: {pr.get('device') or '-'}\nPrinter says: {(pr.get('id') or '-').replace(';', '; ')}\n"
-                              f"Version: {S['version']}")
+        def wrappable(t):                       # long printer addresses break at / _ - . % instead of leaving the panel
+            for ch in "/_-.%:=&":
+                t = t.replace(ch, ch + "\u200b")
+            return t
+        self.conninfo.setText(wrappable(f"Device: {pr.get('device') or '-'}\nPrinter says: {(pr.get('id') or '-').replace(';', '; ')}\n")
+                              + f"Version: {S['version']}")
         for i, v in enumerate(S.get("alignment") or []):
             if i < 4:
                 self.aln[i].setValue(int(v))
